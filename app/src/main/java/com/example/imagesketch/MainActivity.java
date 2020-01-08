@@ -5,6 +5,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.FileProvider;
 
+import android.annotation.SuppressLint;
 import android.app.ProgressDialog;
 import android.content.DialogInterface;
 import android.content.Intent;
@@ -16,6 +17,8 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
+import android.os.Handler;
+import android.os.Message;
 import android.provider.MediaStore;
 import android.view.View;
 import android.widget.ImageView;
@@ -33,6 +36,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.List;
 
 public class MainActivity extends AppCompatActivity {
@@ -40,6 +44,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
     private static final int TAKE_PHOTO = 101;
     private static final int TAKE_ALBUM = 102;
+    private static final int SUCCESS = 103;
+    private static final int ERROR = 104;
 
     boolean isGenerated = false;
     boolean isGetPicture = false;
@@ -52,11 +58,42 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvSave;
     private LinearLayout llGenerate;
 
+    private LinearLayout llGenerate1;
+    private TextView tvSave1;
+    private TextView tvRegenerate1;
+    private ImageView ivProcessedPicture1;
+
     private Bitmap rawPicture;
     private Bitmap processedPicture;
+    private Bitmap processedPicture1;
     private Uri rawImageUri;
 
     private ProgressDialog generateDialog;
+
+    /*
+   设置handler接收网络线程的信号并处理
+    */
+    @SuppressLint("HandlerLeak")
+    private Handler handler = new Handler() {
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case SUCCESS:
+                    generateDialog.dismiss();
+                    isGenerated = true;
+                    ivProcessedPicture.setImageBitmap(processedPicture);
+                    ivProcessedPicture1.setImageBitmap(processedPicture1);
+                    //ivProcessedPicture.setImageDrawable(getResources().getDrawable(R.drawable.img_add_background));
+                    llGenerate.setVisibility(View.VISIBLE);
+                    llGenerate1.setVisibility(View.VISIBLE);
+                    TastyToast.makeText(getApplicationContext(), "生成成功！", Toast.LENGTH_SHORT, TastyToast.SUCCESS);
+                    break;
+                case ERROR:
+                    generateDialog.dismiss();
+                    TastyToast.makeText(getApplicationContext(), "生成失败,请换一张图片", Toast.LENGTH_SHORT, TastyToast.ERROR);
+                    break;
+            }
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -110,17 +147,22 @@ public class MainActivity extends AppCompatActivity {
                     TastyToast.makeText(getApplicationContext(), "请点击‘新生成’", Toast.LENGTH_SHORT, TastyToast.WARNING);
                 }else{
                     if (isGetPicture){
-                        if (transform()){
-                            generateDialog.dismiss();
-                            isGenerated = true;
-                            //ivProcessedPicture.setImageBitmap(processedPicture);
-                            ivProcessedPicture.setImageDrawable(getResources().getDrawable(R.drawable.img_add_background));
-
-                            llGenerate.setVisibility(View.VISIBLE);
-                            TastyToast.makeText(getApplicationContext(), "生成成功！", Toast.LENGTH_SHORT, TastyToast.SUCCESS);
-                        }else {
-                            TastyToast.makeText(getApplicationContext(), "生成失败,请换一张图片", Toast.LENGTH_SHORT, TastyToast.ERROR);
-                        }
+                        generateDialog.setCanceledOnTouchOutside(false);
+                        generateDialog.setMessage("正在生成...");
+                        generateDialog.show();
+                        final Message message = new Message();
+                        new Thread(new Runnable() {
+                            @Override
+                            public void run() {
+                                if (transform()){
+                                    message.what = SUCCESS;
+                                    handler.sendMessage(message);
+                                }else {
+                                    message.what = ERROR;
+                                    handler.sendMessage(message);
+                                }
+                            }
+                        }).start();
                     } else {
                         TastyToast.makeText(getApplicationContext(), "请先添加一张照片", Toast.LENGTH_SHORT, TastyToast.WARNING);
                     }
@@ -149,7 +191,19 @@ public class MainActivity extends AppCompatActivity {
         tvSave.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                if(save()){
+                if(save(0)){
+                    TastyToast.makeText(getApplicationContext(), "保存成功！文件已经保存到/storage/emulated/0", Toast.LENGTH_SHORT, TastyToast.SUCCESS);
+                }else {
+                    TastyToast.makeText(getApplicationContext(), "保存失败！", Toast.LENGTH_SHORT, TastyToast.ERROR);
+                }
+            }
+        });
+
+        // 设置保存标签的触发
+        tvSave1.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                if(save(1)){
                     TastyToast.makeText(getApplicationContext(), "保存成功！文件已经保存到/storage/emulated/0", Toast.LENGTH_SHORT, TastyToast.SUCCESS);
                 }else {
                     TastyToast.makeText(getApplicationContext(), "保存失败！", Toast.LENGTH_SHORT, TastyToast.ERROR);
@@ -176,6 +230,17 @@ public class MainActivity extends AppCompatActivity {
                 isGetPicture = false;
                 isGenerated = false;
                 llGenerate.setVisibility(View.GONE);
+                llGenerate1.setVisibility(View.GONE);
+                ivPicture.setImageDrawable(getResources().getDrawable(R.drawable.img_add_background));
+            }
+        });
+        tvRegenerate1.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                isGetPicture = false;
+                isGenerated = false;
+                llGenerate.setVisibility(View.GONE);
+                llGenerate1.setVisibility(View.GONE);
                 ivPicture.setImageDrawable(getResources().getDrawable(R.drawable.img_add_background));
             }
         });
@@ -191,18 +256,21 @@ public class MainActivity extends AppCompatActivity {
         llGenerate = findViewById(R.id.llgenerate);
         generateDialog = new ProgressDialog(MainActivity.this);
 
+        llGenerate1 = findViewById(R.id.llgenerate1);
+        tvSave1 = findViewById(R.id.tv_save1);
+        tvRegenerate1 = findViewById(R.id.tv_regenerate1);
+        ivProcessedPicture1 = findViewById(R.id.iv_generate_picture1);
+
         llGenerate.setVisibility(View.INVISIBLE); // 设置初始的
+        llGenerate1.setVisibility(View.INVISIBLE);
     }
 
     /**
-     * TODO transform函数，就是将rawPicture进行处理，生成得到processedPicture;
+     * transform函数，就是将rawPicture进行处理，生成得到processedPicture;
      * 这里的rawPicture就是Bitmap类型的原图，processdPicture同样也是一个Bitmap，且已经初始化
      * 成功返回ture, 反之false
      */
     private boolean transform() {
-        generateDialog.setCanceledOnTouchOutside(false);
-        generateDialog.setMessage("正在生成...");
-        generateDialog.show();
         int height = rawPicture.getHeight();
         int width = rawPicture.getWidth();
         int[][][] arr = new int[width][height][3];
@@ -226,8 +294,17 @@ public class MainActivity extends AppCompatActivity {
                 processedPicture.setPixel(i, j, Color.rgb(red, green, blue));
             }
         }
+        processedPicture1 = rawPicture.copy(Bitmap.Config.ARGB_4444 , true);
+        result = a2(arr);
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                int red = result[i][j];
+                int green = result[i][j];
+                int blue = result[i][j];
+                processedPicture1.setPixel(i, j, Color.rgb(red, green, blue));
+            }
+        }
 
-        //TODO
         return true;
     }
 
@@ -361,7 +438,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // 保存处理后的照片
-    private boolean save(){
+    private boolean save(int which){
         //获得系统的时间，单位为毫秒,转换为妙
         long totalMilliSeconds = System.currentTimeMillis();
         long totalSeconds = totalMilliSeconds / 1000;
@@ -375,12 +452,17 @@ public class MainActivity extends AppCompatActivity {
 
         //求出现在的小时
         long totalHour = totalMinutes / 60;
-        long currentHour = totalHour % 24;
+        long currentHour = (totalHour + 8) % 24;
 
-        String nowTime = currentHour + ":" + currentMinute + ":" + currentSecond + " GMT";
+        String nowTime = currentHour + ":" + currentMinute + ":" + currentSecond + " CST";
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        processedPicture.compress(Bitmap.CompressFormat.JPEG, 100, baos);
+        if (which == 0){
+            processedPicture.compress(Bitmap.CompressFormat.JPEG, 100, baos);
+        }else {
+            processedPicture1.compress(Bitmap.CompressFormat.JPEG, 100, baos);
+        }
+
 
         File file = new File(Environment.getExternalStorageDirectory(), nowTime + ".jpg");
         try {
@@ -407,10 +489,10 @@ public class MainActivity extends AppCompatActivity {
             case TAKE_PHOTO:
                 if (resultCode == RESULT_OK){
                     try {
-                        rawPicture = BitmapFactory.decodeStream(getContentResolver().openInputStream(rawImageUri));
+                        rawPicture = getBitmapFormUri(rawImageUri);
                         ivPicture.setImageBitmap(rawPicture);
                         isGetPicture = true;
-                    }catch (FileNotFoundException e){
+                    }catch (IOException e){
                         e.printStackTrace();
                     }
                 }
@@ -418,15 +500,63 @@ public class MainActivity extends AppCompatActivity {
             case TAKE_ALBUM:
                 if (resultCode == RESULT_OK){
                     try{
-                        rawPicture = BitmapFactory.decodeStream(getContentResolver().openInputStream(data.getData()));
+                        rawPicture = getBitmapFormUri(data.getData());
                         ivPicture.setImageBitmap(rawPicture);
                         isGetPicture = true;
-                    }catch (FileNotFoundException e){
+                    }catch (IOException e){
                         e.printStackTrace();
                     }
                 }
                 break;
         }
+    }
+
+    // 尺寸压缩函数
+    public Bitmap getBitmapFormUri(Uri uri) throws IOException, IOException {
+
+        InputStream input = getContentResolver().openInputStream(uri);
+
+        //这一段代码是不加载文件到内存中也得到bitmap的真是宽高，主要是设置inJustDecodeBounds为true
+        BitmapFactory.Options onlyBoundsOptions = new BitmapFactory.Options();
+
+        onlyBoundsOptions.inJustDecodeBounds = true;//不加载到内存
+//        onlyBoundsOptions.inDither = true;//optional
+//        onlyBoundsOptions.inPreferredConfig = Bitmap.Config.RGB_565;//optional
+
+        BitmapFactory.decodeStream(input, null, onlyBoundsOptions);
+
+        input.close();
+
+        int originalWidth = onlyBoundsOptions.outWidth;
+        int originalHeight = onlyBoundsOptions.outHeight;
+
+        if ((originalWidth == -1) || (originalHeight == -1))
+            return null;
+
+        //图片分辨率以480x800为标准
+        float hh = 1280f;//这里设置高度为800f
+        float ww = 720f;//这里设置宽度为480f
+        //缩放比，由于是固定比例缩放，只用高或者宽其中一个数据进行计算即可
+        int be = 1;//be=1表示不缩放
+        if (originalWidth > originalHeight && originalWidth > ww) {//如果宽度大的话根据宽度固定大小缩放
+            be = (int) (originalWidth / ww);
+        } else if (originalWidth < originalHeight && originalHeight > hh) {//如果高度高的话根据宽度固定大小缩放
+            be = (int) (originalHeight / hh);
+        }
+        if (be <= 0)
+            be = 1;
+        //比例压缩
+        BitmapFactory.Options bitmapOptions = new BitmapFactory.Options();
+        bitmapOptions.inSampleSize = be;//设置缩放比例
+//        bitmapOptions.inDither = true;
+//        bitmapOptions.inPreferredConfig = Bitmap.Config.RGB_565;
+        input = getContentResolver().openInputStream(uri);
+
+        Bitmap bitmap = BitmapFactory.decodeStream(input, null, bitmapOptions);
+
+        input.close();
+
+        return bitmap;
     }
 }
 
