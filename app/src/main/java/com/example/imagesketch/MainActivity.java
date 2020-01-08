@@ -12,6 +12,7 @@ import android.content.SharedPreferences;
 import android.drm.ProcessedData;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Environment;
@@ -202,9 +203,111 @@ public class MainActivity extends AppCompatActivity {
         generateDialog.setCanceledOnTouchOutside(false);
         generateDialog.setMessage("正在生成...");
         generateDialog.show();
+        int height = rawPicture.getHeight();
+        int width = rawPicture.getWidth();
+        int[][][] arr = new int[width][height][3];
+
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                // System.out.printf("i:%d j:%d\n", i, j);
+                int pixel = rawPicture.getPixel(i, j);
+                arr[i][j][0] = Color.red(pixel);
+                arr[i][j][1] = Color.green(pixel);
+                arr[i][j][2] = Color.blue(pixel);
+            }
+        }
+        processedPicture = rawPicture.copy(Bitmap.Config.ARGB_4444 , true);
+        int[][] result = a1(arr);
+        for (int i = 0; i < width; i++) {
+            for (int j = 0; j < height; j++) {
+                int red = result[i][j];
+                int green = result[i][j];
+                int blue = result[i][j];
+                processedPicture.setPixel(i, j, Color.rgb(red, green, blue));
+            }
+        }
 
         //TODO
         return true;
+    }
+
+    private static int[][] a1(int[][][] image) {
+        int[][][] temp = image;
+        int h = image.length, w = image[0].length;
+        for (int row = 0; row < h - 1; row++) {
+            for (int col = 0; col < w - 1; col++) {
+                for (int dim = 0; dim < 3; dim++) {
+                    int p1 = image[row][col][dim];
+                    int p2 = image[row + 1][col][dim];
+                    int p3 = image[row][col + 1][dim];
+                    temp[row][col][dim] = 255 - 2 * (int) Math.sqrt(Math.pow(p1 - p2, 2) + Math.pow(p1 - p3, 2));
+                }
+            }
+        }
+        int[][] result = new int[h][w];
+        double c1 = 0.299, c2 = 0.587, c3 = 0.114;
+
+        for (int row = 0; row < h; row++) {
+            for (int col = 0; col < w; col++) {
+                if (row == h - 1 || col == w - 1) {
+                    result[row][col] = 255;
+                } else {
+                    result[row][col] = (int) (c1 * temp[row][col][0] + c2 * temp[row][col][1] +
+                            c3 * temp[row][col][2]);
+                }
+                if (result[row][col] > 255) {
+                    result[row][col] = 255;
+                }
+                if (result[row][col] < 0) {
+                    result[row][col] = 0;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static int[][] a2(int[][][] image) {
+        double[][] gaussian = new double[][]{
+                {0.036883446013326, 0.039164190939482, 0.039955360077524, 0.039164190939482, 0.036883446013326},
+                {0.039164190939482, 0.041585969255423, 0.042426061560694, 0.041585969255423, 0.039164190939482},
+                {0.039955360077524, 0.042426061560694, 0.043283124856278, 0.042426061560694, 0.039955360077524},
+                {0.039164190939482, 0.041585969255423, 0.042426061560694, 0.041585969255423, 0.039164190939482},
+                {0.036883446013326, 0.039164190939482, 0.039955360077524, 0.039164190939482, 0.036883446013326}
+        };
+        int width = image.length, height = image[0].length;
+
+        int[][] gray = new int[width][height];
+        double[][] blurry = new double[width][height];
+        int[][] result = new int[width][height];
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                gray[x][y] = (int) (0.299 * image[x][y][0] + 0.587 * image[x][y][1] + 0.114 * image[x][y][2]);
+            }
+        }
+
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                blurry[x][y] = 0;
+                for (int row = 0; row < 5; row++) {
+                    for (int col = 0; col < 5; col++) {
+                        blurry[x][y] += gaussian[row][col] *
+                                gray[Math.max(0, Math.min(width -1 , x + row - 2))][Math.max(0, Math.min(height - 1, y + col - 2))];
+                    }
+                }
+                blurry[x][y] = 255 - blurry[x][y];
+            }
+        }
+
+        for (int x = 0; x < width; x++) {
+            for (int y = 0; y < height; y++) {
+                int a = gray[x][y];
+                double b = blurry[x][y];
+                result[x][y] = (int) Math.min(255, a + (double)(a * b) / (255 - b));
+            }
+        }
+
+        return result;
     }
 
     // 获取照片函数
